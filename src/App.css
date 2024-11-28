@@ -6,7 +6,11 @@
   border-radius: 15px;
   transition: all 0.3s ease;
 }
-
+body{
+  background: #0A0F1D;
+  color: "#e2e8f0";
+  fontFamily: "'Space Grotesk', sans-serif";
+}
 .neo-card:hover {
   border-color: rgba(59, 130, 246, 0.3);
   box-shadow: 0 0 20px rgba(59, 130, 246, 0.1);
@@ -21,6 +25,7 @@
   cursor: pointer;
   transition: all 0.3s ease;
 }
+
 
 .cyber-button:hover {
   opacity: 0.9;

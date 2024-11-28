@@ -1,88 +1,81 @@
 import React, { useState, useEffect } from "react";
-import { FaEthereum, FaBitcoin, FaDollarSign } from "react-icons/fa";
-import { SiBinance, SiSolana } from "react-icons/si";
-import AcedTicker from "../assets/aced-ticker.png";
-import { Connection, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
-
+import { FixedSizeList as List } from "react-window";
 import axios from "axios";
-
-// SOLANA MAINNET ENDPOINT
-const connection = new Connection("https://api.mainnet-beta.solana.com", "confirmed");
-console.log("Connection = ", connection);
 
 const SwapCard = () => {
   const [loading, setLoading] = useState(true);
   const [rotated, setRotated] = useState(false);
   const [fromToken, setFromToken] = useState("SOL");
   const [toToken, setToToken] = useState("AceD");
-  const [availableTokens, setAvailableTokens] = useState([]); // Available tokens for swapping
-  const [fromAmount, setFromAmount] = useState(""); // User input for the from token amount
-  const [error, setError] = useState(""); // Error message for user
-  const [solBalance, setSolBalance] = useState("0.00"); // Store Solana balance
+  const [availableTokens, setAvailableTokens] = useState([]); 
+  const [displayedTokens, setDisplayedTokens] = useState([]); 
+  const [fromAmount, setFromAmount] = useState(""); 
+  const [error, setError] = useState(""); 
+  const [currentPage, setCurrentPage] = useState(0); // Current page for token pagination
+  const [searchTerm, setSearchTerm] = useState(""); // Current search term
 
-  // Static example of tokens (for initial display)
-  const allTokens = [
-    { label: "ETH", icon: <FaEthereum />, balance: "2,345.67", address: "ETH_Address" },
-    { label: "BTC", icon: <FaBitcoin />, balance: "1.23", address: "BTC_Address" },
-    { label: "USDT", icon: <FaDollarSign />, balance: "10,000", address: "USDT_Address" },
-    { label: "USDC", icon: <FaDollarSign />, balance: "9,000", address: "USDC_Address" },
-    { label: "BNB", icon: <SiBinance />, balance: "45", address: "BNB_Address" },
-    { label: "SOL", icon: <SiSolana />, balance: solBalance, address: "SOL_Address" }, // Use the dynamic Solana balance
-    { label: "AceD", icon: <img className="aced-ticker" src={AcedTicker} />, balance: "150,000", address: "AceD_Address" },
-  ];
+  const TOKEN_BATCH_SIZE = 100; // Number of tokens to fetch per batch
+  const API_URL = "http://localhost:5001/raydium-pairs";
 
+  // Fetch tokens (paginated)
   useEffect(() => {
-    console.log("Available tokens for dropdown:", availableTokens[0]);
-  }, [availableTokens]);
+    fetchTokens(currentPage);
+  }, [currentPage]);
 
-  useEffect(() => {
-    // Fetch Solana balance on component mount or when fromToken changes
-    if (fromToken === "SOL") {
-      fetchSolanaBalance();
-    }
-  }, [fromToken]);
-
-  // Fetch available tokens from the backend (like Raydium API)
-  useEffect(() => {
-    const fetchTokens = async () => {
-      setLoading(true);
-      try {
-        const response = await axios.get("http://localhost:5001/raydium-pairs");
-        const tokens = response.data.map(pair => ({
-          name: pair.name.split('/')[0], // Extract the first token's name (e.g., 'HappyMusk')
-          address: pair.amm_id, // Use 'amm_id' as the unique address
+  const fetchTokens = async (page) => {
+    setLoading(true);
+    try {
+      const response = await axios.get(`${API_URL}?offset=${page * TOKEN_BATCH_SIZE}&limit=${TOKEN_BATCH_SIZE}`);
+      if (response.data && Array.isArray(response.data)) {
+        const tokens = response.data.map((pair) => ({
+          name: pair.name.split("/")[0],
+          address: pair.amm_id,
+          ticker: pair.name.split("/")[1],
         }));
-        console.log("Transformed tokens:", tokens); // Debugging: Check the transformed data
-        // Set tokens and stop loading
-        setAvailableTokens(response.data);
-        setLoading(false);
-      } catch (error) {
-        setError("Failed to fetch tokens.");
-        setLoading(false);
+
+        // Prevent duplicates by using a Set
+        const uniqueTokens = [...new Map([...availableTokens, ...tokens].map((item) => [item.name, item])).values()];
+
+        setAvailableTokens(uniqueTokens);
+        setDisplayedTokens(uniqueTokens);
+      } else {
+        throw new Error("Invalid data format received from API.");
       }
-    };
-
-    fetchTokens();
-  }, []);
-
-
-  // Fetch Solana balance for the wallet (simplified to fetch SOL balance)
-  const fetchSolanaBalance = async () => {
-    if (window.solana && window.solana.publicKey) {
-      try {
-        const publicKey = window.solana.publicKey.toString();
-        const balance = await connection.getBalance(new PublicKey(publicKey));
-        const solBalance = balance / 1000000000; // Convert lamports to SOL
-        setSolBalance(solBalance.toFixed(2)); // Set balance with 2 decimal places
-        setFromAmount(solBalance.toFixed(2)); // Set the amount to the available balance
-      } catch (error) {
-        console.error("Error fetching Solana balance:", error);
-        setSolBalance("0.00");
-      }
+    } catch (error) {
+      console.error("Failed to fetch tokens:", error);
+      setError("Failed to fetch tokens.");
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Handle token change (from / to)
+
+useEffect(() => {
+  if (searchTerm.trim()) {
+    const filteredTokens = availableTokens
+      .filter((token) =>
+        token.name.toLowerCase().includes(searchTerm.toLowerCase())
+      )
+      .sort((a, b) => {
+        const searchLower = searchTerm.toLowerCase();
+        const aStartsWith = a.name.toLowerCase().startsWith(searchLower);
+        const bStartsWith = b.name.toLowerCase().startsWith(searchLower);
+
+        // Prioritize tokens starting with the search term
+        if (aStartsWith && !bStartsWith) return -1;
+        if (!aStartsWith && bStartsWith) return 1;
+
+        // For tokens containing the term elsewhere, sort alphabetically
+        return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+      });
+
+    setDisplayedTokens(filteredTokens);
+  } else {
+    setDisplayedTokens(availableTokens); // Reset if no search term
+  }
+}, [searchTerm, availableTokens]);
+
+
   const handleTokenChange = (tokenType, value) => {
     if (tokenType === "from") {
       setFromToken(value);
@@ -91,58 +84,13 @@ const SwapCard = () => {
     }
   };
 
-  const handleSwapArrowClick = () => {
-    setRotated(!rotated);
-    const temp = fromToken;
-    setFromToken(toToken);
-    setToToken(temp);
-  };
-
-  const handleSwap = async () => {
-    if (!fromAmount || isNaN(fromAmount) || fromAmount <= 0) {
-      setError("Please enter a valid amount.");
-      return;
-    }
-    if (!toToken) {
-      setError("Please select a valid token to swap.");
-      return;
-    }
-
-    try {
-      // Perform token swap
-      const swapTransaction = await swapTokens(fromAmount, toToken);
-      alert('Swap successful! Transaction hash: ' + swapTransaction);
-    } catch (err) {
-      console.error(err);
-      setError('Swap failed. Please try again.');
+  const handleScrollEnd = () => {
+    if (!loading && !searchTerm) {
+      setCurrentPage((prevPage) => prevPage + 1); // Load next batch of tokens only if not searching
     }
   };
 
-  const swapTokens = async (amount, toTokenAddress) => {
-    const fromAmount = parseFloat(amount); // Amount of SOL
-    const fromToken = new PublicKey("So11111111111111111111111111111111111111112"); // SOL address
-    const toToken = new PublicKey(toTokenAddress);  // Replace with the actual token address
-    const walletPublicKey = new PublicKey(window.solana.publicKey.toString());  // Phantom wallet
-
-    const transaction = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: walletPublicKey,
-        toPubkey: toToken,
-        lamports: fromAmount * 1000000000, // Convert SOL to lamports
-      })
-    );
-
-    const signature = await window.solana.sendTransaction(transaction, connection);
-    await connection.confirmTransaction(signature);
-
-    return signature; // Return the transaction signature
-  };
-
-  const handleTokenSelect = (selectedToken) => {
-    setToToken(selectedToken); // Set the selected token name or identifier
-  };
-
-  if (loading) {
+  if (loading && !availableTokens.length) {
     return <div>Loading tokens...</div>;
   }
 
@@ -156,12 +104,14 @@ const SwapCard = () => {
       <div className={`glass-panel p-4 mb-2 ${rotated ? "order-last" : "order-first"}`}>
         <TokenInput
           label="From"
-          balance={allTokens.find((t) => t.label === fromToken)?.balance}
+          amount={fromAmount}
+          balance="N/A"
           token={fromToken}
-          tokens={[]}  // No other tokens available for "From" input
-          fromAmount={fromAmount} // Pass fromAmount as a prop
-          setFromAmount={setFromAmount} // Pass setFromAmount as a prop
-          onChange={(value) => handleTokenChange("from", value)}
+          tokens={displayedTokens}
+          onChangeAmount={(value) => setFromAmount(value)}
+          onChangeToken={(value) => handleTokenChange("from", value)}
+          onSearch={(value) => setSearchTerm(value)}
+          onScrollEnd={handleScrollEnd}
         />
       </div>
 
@@ -169,7 +119,12 @@ const SwapCard = () => {
       <div className="flex justify-center -my-2 relative z-10">
         <div
           className="swap-arrow"
-          onClick={handleSwapArrowClick}
+          onClick={() => {
+            setRotated(!rotated);
+            const temp = fromToken;
+            setFromToken(toToken);
+            setToToken(temp);
+          }}
           style={{ transform: rotated ? "rotate(180deg)" : "rotate(0)" }}
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -182,19 +137,17 @@ const SwapCard = () => {
       <div className={`glass-panel p-4 mt-2 ${rotated ? "order-first" : "order-last"}`}>
         <TokenInput
           label="To"
-          balance={allTokens.find((t) => t.label === toToken)?.balance}
+          amount={""} // Amount for "To" token is not needed
+          balance="N/A"
           token={toToken}
-          tokens={availableTokens}  // Dynamically pass availableTokens
-          onChange={(value) => handleTokenChange("to", value)}
+          tokens={displayedTokens}
+          onChangeToken={(value) => handleTokenChange("to", value)}
+          onSearch={(value) => setSearchTerm(value)}
+          onScrollEnd={handleScrollEnd}
         />
-
-
       </div>
 
-      <button
-        onClick={handleSwap}
-        className="bg-blue-600 mt-4 hover:bg-blue-700 px-8 py-3 rounded-full transition-all duration-300 w-full"
-      >
+      <button className="bg-blue-600 mt-4 hover:bg-blue-700 px-8 py-3 rounded-full transition-all duration-300 w-full">
         Swap Now
       </button>
       {error && <p className="text-red-500 text-center mt-2">{error}</p>}
@@ -202,21 +155,73 @@ const SwapCard = () => {
   );
 };
 
-const TokenInput = ({ label, balance, token, fromAmount, setFromAmount, tokens, onChange }) => {
-  console.log("Tokens passed to TokenInput:", tokens);
-
+const TokenInput = ({
+  label,
+  amount,
+  balance,
+  token,
+  tokens,
+  onChangeAmount,
+  onChangeToken,
+  onSearch,
+  onScrollEnd,
+}) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
-  const handleDropdownToggle = () => {
-    console.log(tokens.length)
-    if (tokens.length > 0) {
-      setDropdownOpen(!dropdownOpen);
-    }
+  const copyToClipboard = (text) => {
+    navigator.clipboard.writeText(text);
+    alert("Copied to clipboard: " + text);
   };
 
+  const Row = ({ index, style }) => {
+    const tokenData = tokens[index];
+  
+    // Safeguard against undefined or missing properties
+    const fullName = tokenData?.name?.split("/")?.[0] || "Unknown Token";
+    console.log(tokenData);
+    
+    const ticker = tokenData?.ticker || "Unknown Ticker";
+    const truncatedAddress =
+      tokenData?.address
+        ? tokenData.address.slice(0, 6) + "..." + tokenData.address.slice(-6)
+        : "N/A";
+  
+    return (
+      <div
+        style={style}
+        className="px-4 py-2 flex items-center justify-between hover:bg-black color-white cursor-pointer"
+        onClick={() => {
+          if (tokenData?.name) {
+            onChangeToken(tokenData.name); // Pass token name back
+            setDropdownOpen(false);
+          }
+        }}
+      >
+        <div>
+          <p className="font-bold">{fullName}</p>
+          <p className="text-sm text-gray-500">{ticker}</p>
+        </div>
+        <div className="flex items-center space-x-2">
+          <span className="text-sm text-blue-500">{truncatedAddress}</span>
+          {tokenData?.pair_id && (
+            <button
+              className="text-xs bg-gray-200 px-2 py-1 rounded hover:bg-gray-300"
+              onClick={(e) => {
+                e.stopPropagation(); // Prevent triggering the dropdown item click
+                copyToClipboard(tokenData.pair_id);
+              }}
+            >
+              Copy
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+  
 
   return (
-    <div>
+    <div className="token-input-container">
       <div className="flex justify-between items-center mb-2">
         <span className="text-sm text-blue-400">{label}</span>
         <span className="text-sm">Balance: {balance}</span>
@@ -224,57 +229,53 @@ const TokenInput = ({ label, balance, token, fromAmount, setFromAmount, tokens, 
       <div className="flex space-x-4 relative">
         <input
           type="text"
-          value={fromAmount}
-          placeholder="0.0"
           className="input-field flex-grow"
-          onChange={(e) => setFromAmount(e.target.value)}
+          placeholder="Enter amount"
+          value={amount}
+          onChange={(e) => onChangeAmount(e.target.value)}
         />
-        <div className="relative">
-          <button
-            className="token-select flex items-center gap-2"
-            onClick={handleDropdownToggle}
+        <button
+          className="token-select flex items-center gap-2"
+          onClick={() => setDropdownOpen(!dropdownOpen)}
+        >
+          <span>{token}</span>
+          <svg
+            className={`w-4 h-4 transition-transform ${
+              dropdownOpen ? "rotate-180" : "rotate-0"
+            }`}
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
           >
-            <span>{token}</span> {/* Display the selected token */}
-            <svg
-              className={`w-4 h-4 transition-transform ${dropdownOpen ? "rotate-180" : "rotate-0"
-                }`}
-              xmlns="http://www.w3.org/2000/svg"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
-
-
-          {dropdownOpen && (
-            <div className="absolute z-10 bg-white border rounded-md shadow-lg mt-1 w-full max-h-48 overflow-y-auto">
-              {tokens.length === 0 ? (
-                <div className="px-4 py-2 text-gray-500">No tokens available</div>
-              ) : (
-                tokens.map((token, index) => (
-                  <div
-                    key={token.amm_id || index} // Use amm_id for the unique key
-                    className="px-4 py-2 cursor-pointer hover:bg-gray-100"
-                    onClick={() => {
-                      onChange(token.name); // Update the selected token
-                      setDropdownOpen(false); // Close the dropdown
-                    }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span>{token.name}</span> {/* Show token name */}
-                    </div>
-                  </div>
-                ))
-              )}
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M19 9l-7 7-7-7"
+            />
+          </svg>
+        </button>
+        {dropdownOpen && (
+          <div className="absolute z-20 bg-[#121D33] border border-[#111D33] rounded-md shadow-lg mt-1 w-full max-h-48 overflow-hidden">
+            <div className="sticky top-0 bg-[#121D33] p-2 border-[#111D33] border-b">
+              <input
+                type="text"
+                placeholder="Search token..."
+                className="bg-black input-search w-full p-2 border border-[#111D33] rounded"
+                onChange={(e) => onSearch(e.target.value)}
+              />
             </div>
-          )}
-
-
-
-
-        </div>
+            <List
+              height={200}
+              itemCount={tokens.length}
+              itemSize={60} // Increased for larger rows
+              onItemsRendered={onScrollEnd}
+            >
+              {Row}
+            </List>
+          </div>
+        )}
       </div>
     </div>
   );
